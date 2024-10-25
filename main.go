@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -25,10 +29,32 @@ func main() {
 	r.HandleFunc("/http/ping", httpPing).Methods("GET")
 	r.HandleFunc("/http/serve/{size:[0-9]+}", httpServeContent).Methods("GET")
 	r.HandleFunc("/http/{url:.*}", httpGet).Methods("GET")
+	r.HandleFunc("/shutdown", shutdown).Methods("GET")
+	srv := &http.Server{
+		Addr:         "0.0.0.0:60999",
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+		Handler:      r,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.Error(err)
+		}
+	}()
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
+	srv.Shutdown(ctx)
+	log.Info("shutting down")
+	os.Exit(0)
+}
 
-	http.Handle("/", r)
-	log.Info("Staring up the server")
-	http.ListenAndServe(":60999", nil)
+func shutdown(w http.ResponseWriter, req *http.Request) {
+	fmt.Fprint(w, "shutting down\n")
+	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 }
 
 func httpGet(w http.ResponseWriter, req *http.Request) {
@@ -79,6 +105,7 @@ func httpServeContent(w http.ResponseWriter, req *http.Request) {
 }
 
 func httpPing(w http.ResponseWriter, req *http.Request) {
+	log.Info("HTTP ping")
 	fmt.Fprint(w, "pong\n")
 }
 
