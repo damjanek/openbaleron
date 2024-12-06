@@ -1,4 +1,7 @@
 Openbaleron is a simple tool meant for running as a pod or on VM image to test network communcation
+
+Right now it's being reworked to use redis pub/sub for controlling it. The following is now outdated. Will update it once I settle on some final vision.
+
 As of now it's capable of doing the following:
 * ICMP: - **curl pod_ip:60999/google.com/4/200** will perform icmp request to google.com, 4 times, with 200 byte packets
 * HTTP GET - **curl pod_ip:60999/about.google** will make http GET to http://about.google and will follow redirects

@@ -29,6 +29,7 @@ type Response struct {
 	Hostname string `json:"hostname"`
 	Output   string `json:"output"`
 	Success  bool   `json:"success"`
+	UUID     string `json:"uuid"`
 }
 
 type RunRequest struct {
@@ -102,13 +103,14 @@ func stripNetmask(ips []string) []string {
 	return ret
 }
 
-func icmpRequest(msg string) (Response, error) {
+func icmpRequest(msg, uuid string) (Response, error) {
 	var req IcmpRequest
 	err := json.Unmarshal([]byte(msg), &req)
 	if err != nil {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("malformed json: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while unmarshalling ICMP request: %v", err)
 	}
 	ok := icmpWrapper(req.Address, req.Count, req.Size, req.Burst)
@@ -117,22 +119,25 @@ func icmpRequest(msg string) (Response, error) {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("%v", ok),
+			UUID:     uuid,
 		}, nil
 	}
 	return Response{
 		Hostname: hostname(),
 		Output:   "",
 		Success:  true,
+		UUID:     uuid,
 	}, nil
 }
 
-func httpGet(msg string) (Response, error) {
+func httpGet(msg, uuid string) (Response, error) {
 	var req HttpRequest
 	err := json.Unmarshal([]byte(msg), &req)
 	if err != nil {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("malformed json: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while unmarshalling HTTP GET request: %v", err)
 	}
 	client := http.Client{
@@ -147,12 +152,14 @@ func httpGet(msg string) (Response, error) {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("GET error: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while running HTTP GET: %v", err)
 	}
 	if res.StatusCode != 200 {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("status code: %d", res.StatusCode),
+			UUID:     uuid,
 		}, fmt.Errorf("unexpected http response: %d", res.StatusCode)
 	}
 	defer res.Body.Close()
@@ -162,6 +169,7 @@ func httpGet(msg string) (Response, error) {
 		Hostname: hostname(),
 		Output:   "",
 		Success:  true,
+		UUID:     uuid,
 	}, nil
 }
 
@@ -173,13 +181,14 @@ func hostname() string {
 	return hostname
 }
 
-func runRequest(msg string) (Response, error) {
+func runRequest(msg, uuid string) (Response, error) {
 	var req RunRequest
 	err := json.Unmarshal([]byte(msg), &req)
 	if err != nil {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("malformed json: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while unmarshalling run request: %v", err)
 	}
 	if req.Timeout == 0 {
@@ -196,22 +205,25 @@ func runRequest(msg string) (Response, error) {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("error: %v", err),
+			UUID:     uuid,
 		}, nil
 	}
 	return Response{
 		Hostname: hostname(),
 		Output:   string(out),
 		Success:  true,
+		UUID:     uuid,
 	}, nil
 }
 
-func put(msg string) (Response, error) {
+func put(msg, uuid string) (Response, error) {
 	var req PutRequest
 	err := json.Unmarshal([]byte(msg), &req)
 	if err != nil {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("malformed json: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while unmarshalling put request: %v", err)
 	}
 	file, err := os.Create(req.Location)
@@ -219,6 +231,7 @@ func put(msg string) (Response, error) {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("error: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while creating file: %v", err)
 	}
 	defer file.Close()
@@ -228,6 +241,7 @@ func put(msg string) (Response, error) {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("error: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while getting content: %v", err)
 	}
 	_, err = file.WriteString(content)
@@ -236,6 +250,7 @@ func put(msg string) (Response, error) {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("error: %v", err),
+			UUID:     uuid,
 		}, fmt.Errorf("while writing content: %v", err)
 	}
 
@@ -243,25 +258,29 @@ func put(msg string) (Response, error) {
 		Hostname: hostname(),
 		Output:   "",
 		Success:  true,
+		UUID:     uuid,
 	}, nil
 }
 
 func parseMessage(channel, workID string) (Response, error) {
 	log.Infof("channel: %s, message: %s", channel, workID)
+	uuid := strings.SplitAfterN(workID, "-", 2)[1]
 	msg, err := RedisClient.Get(context.Background(), workID).Result()
 	if err == redis.Nil {
-		return Response{}, fmt.Errorf("workID %s not found", workID)
+		return Response{
+			UUID: uuid,
+		}, fmt.Errorf("workID %s not found", workID)
 	}
 	log.Debug(msg)
 	switch {
 	case strings.HasPrefix(workID, "icmp"):
-		return icmpRequest(msg)
+		return icmpRequest(msg, uuid)
 	case strings.HasPrefix(workID, "httpget"):
-		return httpGet(msg)
+		return httpGet(msg, uuid)
 	case strings.HasPrefix(workID, "put"):
-		return put(msg)
+		return put(msg, uuid)
 	case strings.HasPrefix(workID, "run"):
-		return runRequest(msg)
+		return runRequest(msg, uuid)
 	case workID == "shutdown":
 		log.Info("shutting down as requested")
 		os.Exit(0)
@@ -272,6 +291,7 @@ func parseMessage(channel, workID string) (Response, error) {
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("unsupported task type: %s", workID),
 			Success:  false,
+			UUID:     uuid,
 		}, fmt.Errorf("unsupported task type: %s", workID)
 	}
 }
@@ -389,7 +409,8 @@ func main() {
 		if err != nil {
 			log.Error(err)
 		}
-		err = RedisClient.Publish(ctx, "output", ret).Err()
+		// We only store the result for 10 minutes
+		err = RedisClient.Set(ctx, ret.UUID, ret, 10*time.Minute).Err()
 		if err != nil {
 			log.Errorf("publish: %v", err)
 		}
