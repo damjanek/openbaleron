@@ -355,6 +355,11 @@ func icmpWrapper(target string, count int, size int, burst bool) error {
 	return nil
 }
 
+func httpPing(w http.ResponseWriter, req *http.Request) {
+	log.Info("HTTP ping")
+	fmt.Fprint(w, hostname())
+}
+
 func main() {
 	var httpPort = flag.Int("p", 60999, "Port used for HTTP server")
 	var redisHost = flag.String("r", "169.254.1.1:6379", "Redis host (host:port)")
@@ -368,6 +373,7 @@ func main() {
 	// Setup a HTTP server that will be used for serving content
 	r := mux.NewRouter()
 	r.HandleFunc("/http/serve/{size:[0-9]+}", httpServeContent).Methods("GET")
+	r.HandleFunc("/http/ping", httpPing).Methods("GET")
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", *httpPort)
 	srv := &http.Server{
 		Addr:         listenAddr,
@@ -402,12 +408,12 @@ func main() {
 	for {
 		msg, err := pubSub.ReceiveMessage(ctx)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("pubSub ReceiveMessage: %v", err)
 			continue
 		}
 		ret, err := parseMessage(msg.Channel, msg.Payload)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("parseMessage: %v", err)
 		}
 		// We only store the result for 10 minutes
 		err = RedisClient.Set(ctx, ret.UUID, ret, 10*time.Minute).Err()
