@@ -50,6 +50,11 @@ type HttpRequest struct {
 	Timeout int    `json:"timeout"`
 }
 
+type HttpGetHostname struct {
+	Host    string `json:"host"`
+	Timeout int    `json:"timeout"`
+}
+
 type PutRequest struct {
 	Location string `json:"location"`
 	RedisKey string `json:"redis_key"`
@@ -155,7 +160,7 @@ func httpGet(msg, uuid string) (Response, error) {
 			UUID:     uuid,
 		}, fmt.Errorf("while running HTTP GET: %v", err)
 	}
-	if res.StatusCode != 200 {
+	if res.StatusCode != http.StatusOK {
 		return Response{
 			Hostname: hostname(),
 			Output:   fmt.Sprintf("status code: %d", res.StatusCode),
@@ -277,6 +282,8 @@ func parseMessage(channel, workID string) (Response, error) {
 		return icmpRequest(msg, uuid)
 	case strings.HasPrefix(workID, "httpget"):
 		return httpGet(msg, uuid)
+	case strings.HasPrefix(workID, "httphostname"):
+		return httpGetHostname(msg, uuid)
 	case strings.HasPrefix(workID, "put"):
 		return put(msg, uuid)
 	case strings.HasPrefix(workID, "run"):
@@ -358,6 +365,54 @@ func icmpWrapper(target string, count int, size int, burst bool) error {
 func httpPing(w http.ResponseWriter, req *http.Request) {
 	log.Info("HTTP ping")
 	fmt.Fprint(w, hostname())
+}
+
+func httpGetHostname(msg, uuid string) (Response, error) {
+	var req HttpGetHostname
+	err := json.Unmarshal([]byte(msg), &req)
+	if err != nil {
+		return Response{
+			Hostname: hostname(),
+			Output:   fmt.Sprintf("malformed json: %v", err),
+			UUID:     uuid,
+		}, fmt.Errorf("while unmarshalling HTTP GET request: %v", err)
+	}
+	client := http.Client{
+		Timeout: 2 * time.Second,
+	}
+	if req.Timeout != 0 {
+		client.Timeout = time.Duration(req.Timeout) * time.Second
+	}
+	res, err := client.Get(fmt.Sprintf("http://%s/http/ping", req.Host))
+	if err != nil {
+		return Response{
+			Hostname: hostname(),
+			Output:   fmt.Sprintf("GET error: %v", err),
+			UUID:     uuid,
+		}, fmt.Errorf("while running HTTP GET: %v", err)
+	}
+	if res.StatusCode != http.StatusOK {
+		return Response{
+			Hostname: hostname(),
+			Output:   fmt.Sprintf("status code: %d", res.StatusCode),
+			UUID:     uuid,
+		}, fmt.Errorf("unexpected http response: %d", res.StatusCode)
+	}
+	defer res.Body.Close()
+	bodyBytes, err := io.ReadAll(res.Body)
+	if err != nil {
+		return Response{
+			Hostname: hostname(),
+			Output:   fmt.Sprintf("io.ReadAll: %v", err),
+			UUID:     uuid,
+		}, fmt.Errorf("while reading response: %v", err)
+	}
+	return Response{
+		Hostname: hostname(),
+		Output:   string(bodyBytes),
+		Success:  true,
+		UUID:     uuid,
+	}, nil
 }
 
 func main() {
