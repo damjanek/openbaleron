@@ -24,6 +24,7 @@ import (
 )
 
 var RedisClient *redis.Client
+var httpPort int = 60999
 
 type Response struct {
 	Hostname string `json:"hostname"`
@@ -383,7 +384,7 @@ func httpGetHostname(msg, uuid string) (Response, error) {
 	if req.Timeout != 0 {
 		client.Timeout = time.Duration(req.Timeout) * time.Second
 	}
-	res, err := client.Get(fmt.Sprintf("http://%s/http/ping", req.Host))
+	res, err := client.Get(fmt.Sprintf("http://%s:%d/http/ping", req.Host, httpPort))
 	if err != nil {
 		return Response{
 			Hostname: hostname(),
@@ -416,7 +417,7 @@ func httpGetHostname(msg, uuid string) (Response, error) {
 }
 
 func main() {
-	var httpPort = flag.Int("p", 60999, "Port used for HTTP server")
+	httpPort = *flag.Int("p", 60999, "Port used for HTTP server")
 	var redisHost = flag.String("r", "169.254.1.1:6379", "Redis host (host:port)")
 	flag.Parse()
 
@@ -429,7 +430,7 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/http/serve/{size:[0-9]+}", httpServeContent).Methods("GET")
 	r.HandleFunc("/http/ping", httpPing).Methods("GET")
-	listenAddr := fmt.Sprintf("0.0.0.0:%d", *httpPort)
+	listenAddr := fmt.Sprintf("0.0.0.0:%d", httpPort)
 	srv := &http.Server{
 		Addr:         listenAddr,
 		WriteTimeout: time.Second * 15,
